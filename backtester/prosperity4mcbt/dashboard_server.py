@@ -6,6 +6,7 @@ import subprocess
 import sys
 import time
 import contextlib
+import json
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,9 +18,16 @@ STATE_DIR = Path.home() / ".prosperity4mcbt"
 ROOT_FILE = STATE_DIR / "dashboard_root.txt"
 PID_FILE = STATE_DIR / "dashboard_server.pid"
 DEFAULT_PORT = 8001
+STATUS_PATH = "/__prosperity4mcbt__/status.json"
 
 
 class DashboardRequestHandler(SimpleHTTPRequestHandler):
+    def do_GET(self) -> None:
+        if self.path.split("?", 1)[0] == STATUS_PATH:
+            self._serve_status()
+            return
+        super().do_GET()
+
     def end_headers(self) -> None:
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
@@ -29,6 +37,23 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
 
     def log_message(self, format: str, *args) -> None:
         return
+
+    def _serve_status(self) -> None:
+        root = Path(getattr(self, "directory", ".")).resolve()
+        dashboard_path = root / "dashboard.json"
+        dashboard_exists = dashboard_path.exists()
+        payload = {
+            "root": str(root),
+            "dashboardExists": dashboard_exists,
+            "dashboardMtimeMs": int(dashboard_path.stat().st_mtime_ns // 1_000_000) if dashboard_exists else None,
+            "dashboardSizeBytes": int(dashboard_path.stat().st_size) if dashboard_exists else None,
+        }
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 def serve_dashboard(root: Path, port: int = 8001) -> None:

@@ -27,6 +27,22 @@ function basename(path: string): string {
   return normalized.split('/').filter(Boolean).pop() ?? path;
 }
 
+function withVersion(url: string, version: string | null): string {
+  if (version === null || version.length === 0) {
+    return url;
+  }
+
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}v=${encodeURIComponent(version)}`;
+}
+
+type LocalDashboardStatus = {
+  dashboardExists: boolean;
+  dashboardMtimeMs: number | null;
+  dashboardSizeBytes: number | null;
+  root: string;
+};
+
 export function MonteCarloPage(): ReactNode {
   const storedDashboard = useStore(state => state.monteCarlo);
   const { search } = useLocation();
@@ -34,6 +50,7 @@ export function MonteCarloPage(): ReactNode {
   const [status, setStatus] = useState('Loading Monte Carlo dashboard');
   const [localDashboard, setLocalDashboard] = useState<MonteCarloDashboard | null>(null);
   const [loadedUrl, setLoadedUrl] = useState<string | null>(null);
+  const [dashboardVersion, setDashboardVersion] = useState<string | null>(null);
   const [bandProduct, setBandProduct] = useState('TOMATOES');
   const searchParams = new URLSearchParams(search);
   const explicitOpenUrl = searchParams.get('open');
@@ -41,11 +58,61 @@ export function MonteCarloPage(): ReactNode {
     typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname)
       ? '/dashboard.json'
       : null;
+  const localStatusUrl = localFallbackOpenUrl === null ? null : '/__prosperity4mcbt__/status.json';
   const openUrl = explicitOpenUrl ?? localFallbackOpenUrl;
-  const dashboard = openUrl === null ? storedDashboard : loadedUrl === openUrl ? localDashboard : null;
+  const effectiveOpenUrl = openUrl === null ? null : withVersion(openUrl, explicitOpenUrl === null ? dashboardVersion : null);
+  const dashboard = effectiveOpenUrl === null ? storedDashboard : loadedUrl === effectiveOpenUrl ? localDashboard : null;
 
   useEffect(() => {
-    if (openUrl === null) {
+    if (localStatusUrl === null || explicitOpenUrl !== null) {
+      return;
+    }
+
+    let cancelled = false;
+    let previousVersion: string | null = null;
+
+    const poll = async (): Promise<void> => {
+      try {
+        const response = await axios.get<LocalDashboardStatus>(localStatusUrl, {
+          headers: {
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+          },
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!response.data.dashboardExists || response.data.dashboardMtimeMs === null) {
+          return;
+        }
+
+        const nextVersion = String(response.data.dashboardMtimeMs);
+        if (previousVersion !== nextVersion) {
+          previousVersion = nextVersion;
+          setDashboardVersion(nextVersion);
+        }
+      } catch {
+        if (!cancelled) {
+          setStatus('Waiting for local dashboard');
+        }
+      }
+    };
+
+    void poll();
+    const interval = window.setInterval(() => {
+      void poll();
+    }, 1500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [explicitOpenUrl, localStatusUrl]);
+
+  useEffect(() => {
+    if (effectiveOpenUrl === null) {
       setLoadError(null);
       setStatus('Loading Monte Carlo dashboard');
       setLocalDashboard(null);
@@ -53,7 +120,7 @@ export function MonteCarloPage(): ReactNode {
       return;
     }
 
-    if (openUrl.trim().length === 0) {
+    if (effectiveOpenUrl.trim().length === 0) {
       return;
     }
 
@@ -64,7 +131,12 @@ export function MonteCarloPage(): ReactNode {
     setLoadedUrl(null);
     const load = async (): Promise<void> => {
       try {
-        const response = await axios.get(openUrl);
+        const response = await axios.get(effectiveOpenUrl, {
+          headers: {
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+          },
+        });
         const parsed = parseVisualizerInput(response.data);
 
         if (cancelled) {
@@ -73,7 +145,7 @@ export function MonteCarloPage(): ReactNode {
 
         if (parsed.kind === 'monteCarlo') {
           setLocalDashboard(parsed.monteCarlo);
-          setLoadedUrl(openUrl);
+          setLoadedUrl(effectiveOpenUrl);
           setStatus('Dashboard loaded');
           return;
         }
@@ -92,7 +164,7 @@ export function MonteCarloPage(): ReactNode {
     return () => {
       cancelled = true;
     };
-  }, [openUrl]);
+  }, [effectiveOpenUrl]);
 
   useEffect(() => {
     if (dashboard?.bandSeries?.[bandProduct] !== undefined) {

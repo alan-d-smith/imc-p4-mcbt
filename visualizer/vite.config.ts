@@ -8,6 +8,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/dashboard.json': 'http://127.0.0.1:8001',
+      '/__prosperity4mcbt__': 'http://127.0.0.1:8001',
       '/run_summary.csv': 'http://127.0.0.1:8001',
       '/session_summary.csv': 'http://127.0.0.1:8001',
       '/sample_paths': 'http://127.0.0.1:8001',
