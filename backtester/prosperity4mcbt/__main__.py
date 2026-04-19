@@ -35,20 +35,20 @@ def cli(
             resolve_path=True,
         ),
     ],
+    round_num: Annotated[int, Option("--round", help="Round number to simulate, for example 1 or 2.")] = 1,
     vis: Annotated[bool, Option("--vis", help="Open the Monte Carlo dashboard in the local visualizer when done.")] = False,
     out: Annotated[
         Optional[Path],
         Option(
-            help="Path to dashboard JSON file (defaults to backtests/<timestamp>_monte_carlo/dashboard.json).",
+            help="Path to dashboard JSON file (defaults to backtests/results/mcbt_monte_carlo/<timestamp>/dashboard.json).",
             show_default=False,
             resolve_path=True,
         ),
     ] = None,
-    no_out: Annotated[bool, Option("--no-out", help="Skip saving dashboard output.")] = False,
     data: Annotated[
         Optional[Path],
         Option(
-            help="Path to data directory. If it contains round0/, that round0 directory is used as the actual calibration source.",
+            help="Path to the repo data directory. Both data/ and data/raw/ layouts are supported.",
             show_default=False,
             exists=True,
             file_okay=False,
@@ -58,60 +58,60 @@ def cli(
     ] = None,
     quick: Annotated[
         bool,
-        Option("--quick", help="Preset for a fast run: 100 sessions and 10 sample sessions."),
+        Option("--quick", help="Preset for a fast run: 25 sessions and 5 sample sessions."),
     ] = False,
     heavy: Annotated[
         bool,
-        Option("--heavy", help="Preset for a full run: 1000 sessions and 100 sample sessions."),
+        Option("--heavy", help="Preset for a larger run: 300 sessions and 20 sample sessions."),
     ] = False,
     sessions: Annotated[int, Option("--sessions", help="Number of Monte Carlo sessions to run.")] = 100,
-    fv_mode: Annotated[str, Option("--fv-mode", help="Fair-value mode for the Rust simulator.")] = "simulate",
-    trade_mode: Annotated[str, Option("--trade-mode", help="Trade-arrival mode for the Rust simulator.")] = "simulate",
-    tomato_support: Annotated[str, Option("--tomato-support", help="Latent fair support for tomatoes in simulate mode.")] = "quarter",
-    seed: Annotated[int, Option("--seed", help="RNG seed for the Rust simulator.")] = 20260401,
-    python_bin: Annotated[
-        str,
-        Option("--python-bin", help="Python interpreter used for the strategy worker process."),
-    ] = sys.executable,
     sample_sessions: Annotated[
         int,
-        Option("--sample-sessions", help="Number of sessions to persist with full path/trace data for dashboard charts."),
+        Option("--sample-sessions", help="Number of sessions to persist with full trace data for charts."),
     ] = 10,
+    block_size: Annotated[int, Option("--block-size", help="Mean contiguous block length in ticks.")] = 250,
+    seed: Annotated[int, Option("--seed", help="RNG seed for the Monte Carlo bootstrap.")] = 20260419,
+    workers: Annotated[int, Option("--workers", help="Worker processes used for independent sessions.")] = 4,
+    match_trades: Annotated[
+        str,
+        Option("--match-trades", help="Replay-engine market-trade matching mode."),
+    ] = "all",
+    no_progress: Annotated[bool, Option("--no-progress", help="Disable the session progress bar.")] = False,
     version: Annotated[
         bool,
         Option("--version", "-v", help="Show the program's version number and exit.", is_eager=True, callback=version_callback),
     ] = False,
 ) -> None:
-    if no_out:
-        print("Error: Monte Carlo mode always writes a dashboard bundle, so --no-out is not supported")
-        raise SystemExit(1)
+    _ = version
     if quick and heavy:
         print("Error: --quick and --heavy are mutually exclusive")
         raise SystemExit(1)
 
     if quick:
-        sessions = 100
-        sample_sessions = 10
+        sessions = 25
+        sample_sessions = 5
     elif heavy:
-        sessions = 1000
-        sample_sessions = 100
+        sessions = 300
+        sample_sessions = 20
 
-    dashboard_path = normalize_dashboard_path(out, False) or default_dashboard_path()
+    dashboard_path = normalize_dashboard_path(out, False) or default_dashboard_path(round_num)
 
     dashboard = run_monte_carlo_mode(
         algorithm=algorithm,
         dashboard_path=dashboard_path,
         data_root=data,
+        round_num=round_num,
         sessions=sessions,
-        fv_mode=fv_mode,
-        trade_mode=trade_mode,
-        tomato_support=tomato_support,
-        seed=seed,
-        python_bin=python_bin,
         sample_sessions=sample_sessions,
+        block_size=block_size,
+        seed=seed,
+        workers=max(1, workers),
+        trade_matching_mode=match_trades,
+        show_progress=not no_progress,
     )
 
     total_stats = dashboard["overall"]["totalPnl"]
+    print(f"Round: {round_num}")
     print(f"Sessions: {int(total_stats['count'])}")
     print(f"Mean total PnL: {total_stats['mean']:,.2f}")
     print(f"Std total PnL: {total_stats['std']:,.2f}")

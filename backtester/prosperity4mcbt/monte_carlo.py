@@ -1,4 +1,13 @@
-from prosperity3bt.monte_carlo import default_dashboard_path, normalize_dashboard_path, run_monte_carlo_mode
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from backtests.mcbt_monte_carlo import default_dashboard_path, normalize_dashboard_path, run_monte_carlo_mode
 
 __all__ = [
     "default_dashboard_path",

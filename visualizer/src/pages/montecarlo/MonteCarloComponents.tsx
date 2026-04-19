@@ -248,40 +248,6 @@ export function lineSeries(
   };
 }
 
-export function numericAxisWindow(values: number[], clampMin?: number, clampMax?: number): Highcharts.XAxisOptions {
-  const finiteValues = values.filter(value => Number.isFinite(value));
-  if (finiteValues.length === 0) {
-    return {};
-  }
-
-  let min = Math.min(...finiteValues);
-  let max = Math.max(...finiteValues);
-  const span = Math.max(max - min, 1e-6);
-  const pad = Math.max(span * 0.08, span < 0.05 ? 0.0025 : 0.0);
-
-  min -= pad;
-  max += pad;
-
-  if (clampMin !== undefined) {
-    min = Math.max(min, clampMin);
-  }
-  if (clampMax !== undefined) {
-    max = Math.min(max, clampMax);
-  }
-
-  if (max <= min) {
-    max = min + Math.max(span, 0.01);
-    if (clampMax !== undefined) {
-      max = Math.min(max, clampMax);
-    }
-  }
-
-  return {
-    min,
-    max,
-  };
-}
-
 export function SummaryTable({ title, stats }: { title: string; stats: MonteCarloDistributionStats }): ReactNode {
   const rows: Array<[string, string]> = [
     ['Mean', formatNumber(stats.mean, 2)],
@@ -308,13 +274,26 @@ export function SummaryTable({ title, stats }: { title: string; stats: MonteCarl
   );
 }
 
+function productValue(row: any, product: string, legacyKey: string): number {
+  return row?.productPnls?.[product] ?? row?.[legacyKey] ?? 0;
+}
+
 export function SessionRankingTable({
   title,
   rows,
+  productOrder,
+  productLabels,
 }: {
   title: string;
   rows: MonteCarloDashboard['sessions'];
+  productOrder: string[];
+  productLabels: Record<string, string>;
 }): ReactNode {
+  const firstProduct = productOrder[0] ?? 'EMERALDS';
+  const secondProduct = productOrder[1] ?? firstProduct;
+  const firstLegacyKey = firstProduct === productOrder[0] ? 'emeraldPnl' : 'emeraldPnl';
+  const secondLegacyKey = secondProduct === productOrder[1] ? 'tomatoPnl' : 'tomatoPnl';
+
   return (
     <VisualizerCard title={title}>
       <Table striped withTableBorder withColumnBorders stickyHeader stickyHeaderOffset={0}>
@@ -322,19 +301,19 @@ export function SessionRankingTable({
           <Table.Tr>
             <Table.Th>Session</Table.Th>
             <Table.Th>Total</Table.Th>
-            <Table.Th>EMERALDS</Table.Th>
-            <Table.Th>TOMATOES</Table.Th>
+            <Table.Th>{productLabels[firstProduct] ?? firstProduct}</Table.Th>
+            <Table.Th>{productLabels[secondProduct] ?? secondProduct}</Table.Th>
             <Table.Th>Total $/step</Table.Th>
             <Table.Th>Total R²</Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
-          {rows.map(row => (
+          {rows.map((row: any) => (
             <Table.Tr key={`${title}-${row.sessionId}`}>
               <Table.Td>{row.sessionId}</Table.Td>
               <Table.Td>{formatNumber(row.totalPnl, 2)}</Table.Td>
-              <Table.Td>{formatNumber(row.emeraldPnl, 2)}</Table.Td>
-              <Table.Td>{formatNumber(row.tomatoPnl, 2)}</Table.Td>
+              <Table.Td>{formatNumber(productValue(row, firstProduct, firstLegacyKey), 2)}</Table.Td>
+              <Table.Td>{formatNumber(productValue(row, secondProduct, secondLegacyKey), 2)}</Table.Td>
               <Table.Td>{formatNumber(row.runMeanTotalSlopePerStep ?? row.totalSlopePerStep, 4)}</Table.Td>
               <Table.Td>{formatNumber(row.runMeanTotalR2 ?? row.totalR2, 3)}</Table.Td>
             </Table.Tr>

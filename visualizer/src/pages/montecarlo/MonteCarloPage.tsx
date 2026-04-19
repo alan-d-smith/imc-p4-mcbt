@@ -36,6 +36,49 @@ function withVersion(url: string, version: string | null): string {
   return `${url}${separator}v=${encodeURIComponent(version)}`;
 }
 
+function productOrder(dashboard: any): string[] {
+  const fromMeta = dashboard?.meta?.productOrder;
+  if (Array.isArray(fromMeta) && fromMeta.length > 0) {
+    return fromMeta;
+  }
+
+  const fromProducts = Object.keys(dashboard?.products ?? {});
+  if (fromProducts.length > 0) {
+    return fromProducts;
+  }
+
+  return ['EMERALDS', 'TOMATOES'];
+}
+
+function productLabels(dashboard: any, order: string[]): Record<string, string> {
+  const displayNames = dashboard?.meta?.productDisplayNames ?? {};
+  return Object.fromEntries(order.map(product => [product, displayNames[product] ?? product]));
+}
+
+function productColor(dashboard: any, product: string, fallback: string): string {
+  return dashboard?.meta?.productColors?.[product] ?? fallback;
+}
+
+function productTrend(dashboard: any, product: string, legacyKey: 'EMERALDS' | 'TOMATOES'): any {
+  return dashboard?.trendFits?.[product] ?? dashboard?.trendFits?.[legacyKey];
+}
+
+function productHistogram(dashboard: any, product: string, section: string, legacyKey: string): any {
+  return dashboard?.histograms?.[section]?.[product] ?? dashboard?.histograms?.[legacyKey];
+}
+
+function productNormalFit(dashboard: any, product: string, legacyKey: string): any {
+  return dashboard?.normalFits?.productPnl?.[product] ?? dashboard?.normalFits?.[legacyKey];
+}
+
+function productSummary(dashboard: any, product: string): any {
+  return dashboard?.products?.[product]?.pnl;
+}
+
+function sessionProductPnl(row: any, product: string, legacyKey: string): number {
+  return row?.productPnls?.[product] ?? row?.[legacyKey] ?? 0;
+}
+
 type LocalDashboardStatus = {
   dashboardExists: boolean;
   dashboardMtimeMs: number | null;
@@ -67,7 +110,7 @@ export function MonteCarloPage(): ReactNode {
     }>
   >([]);
   const [selectedRunId, setSelectedRunId] = useState<string>('latest');
-  const [bandProduct, setBandProduct] = useState('TOMATOES');
+  const [bandProduct, setBandProduct] = useState('');
   const searchParams = new URLSearchParams(search);
   const explicitOpenUrl = searchParams.get('open');
   const localMode = typeof window !== 'undefined' && ['localhost', '127.0.0.1'].includes(window.location.hostname);
@@ -208,14 +251,13 @@ export function MonteCarloPage(): ReactNode {
   }, [effectiveOpenUrl]);
 
   useEffect(() => {
-    if (dashboard?.bandSeries?.[bandProduct] !== undefined) {
+    const order = dashboard ? productOrder(dashboard as any) : [];
+    if (bandProduct !== '' && dashboard?.bandSeries?.[bandProduct] !== undefined) {
       return;
     }
-    if (dashboard?.bandSeries !== undefined) {
-      const fallback = Object.keys(dashboard.bandSeries)[0];
-      if (fallback !== undefined) {
-        setBandProduct(fallback);
-      }
+    const fallback = order[1] ?? order[0] ?? '';
+    if (fallback !== '') {
+      setBandProduct(fallback);
     }
   }, [bandProduct, dashboard]);
 
@@ -230,32 +272,44 @@ export function MonteCarloPage(): ReactNode {
     return <LoadingMonteCarloView status={status} />;
   }
 
+  const dashboardAny: any = dashboard;
   const strategyName = basename(dashboard.meta.algorithmPath);
+  const order = productOrder(dashboardAny);
+  const labels = productLabels(dashboardAny, order);
+  const primaryProduct = order[0] ?? 'EMERALDS';
+  const secondaryProduct = order[1] ?? primaryProduct;
+  const primaryLegacyKey = 'emeraldPnl';
+  const secondaryLegacyKey = 'tomatoPnl';
+  const primaryColor = productColor(dashboardAny, primaryProduct, '#12b886');
+  const secondaryColor = productColor(dashboardAny, secondaryProduct, '#fd7e14');
   const totalTrend = dashboard.trendFits.TOTAL;
-  const emeraldTrend = dashboard.trendFits.EMERALDS;
-  const tomatoTrend = dashboard.trendFits.TOMATOES;
+  const primaryTrend = productTrend(dashboardAny, primaryProduct, 'EMERALDS');
+  const secondaryTrend = productTrend(dashboardAny, secondaryProduct, 'TOMATOES');
   const scatterFit = dashboard.scatterFit;
   const selectedBandSeries = dashboard.bandSeries?.[bandProduct];
-  const bandOptions = Object.keys(dashboard.bandSeries ?? {}).map(product => ({ value: product, label: product }));
+  const bandOptions = order.map(product => ({ value: product, label: labels[product] ?? product }));
 
   const totalHistogramSeries: Highcharts.SeriesOptionsType[] = [
     histogramSeries(dashboard.histograms.totalPnl, 'Total PnL', '#4c6ef5'),
     normalFitSeries(dashboard.normalFits.totalPnl),
   ];
-  const emeraldHistogramSeries: Highcharts.SeriesOptionsType[] = [
-    histogramSeries(dashboard.histograms.emeraldPnl, 'EMERALDS PnL', '#12b886'),
-    normalFitSeries(dashboard.normalFits.emeraldPnl),
+  const primaryHistogramSeries: Highcharts.SeriesOptionsType[] = [
+    histogramSeries(productHistogram(dashboardAny, primaryProduct, 'productPnl', primaryLegacyKey), `${labels[primaryProduct]} PnL`, primaryColor),
+    normalFitSeries(productNormalFit(dashboardAny, primaryProduct, primaryLegacyKey)),
   ];
-  const tomatoHistogramSeries: Highcharts.SeriesOptionsType[] = [
-    histogramSeries(dashboard.histograms.tomatoPnl, 'TOMATOES PnL', '#fd7e14'),
-    normalFitSeries(dashboard.normalFits.tomatoPnl),
+  const secondaryHistogramSeries: Highcharts.SeriesOptionsType[] = [
+    histogramSeries(productHistogram(dashboardAny, secondaryProduct, 'productPnl', secondaryLegacyKey), `${labels[secondaryProduct]} PnL`, secondaryColor),
+    normalFitSeries(productNormalFit(dashboardAny, secondaryProduct, secondaryLegacyKey)),
   ];
   const scatterSeries: Highcharts.SeriesOptionsType[] = [
     {
       type: 'scatter',
       name: 'Sessions',
       color: '#4c6ef5',
-      data: dashboard.sessions.map(row => [row.emeraldPnl, row.tomatoPnl]),
+      data: dashboard.sessions.map((row: any) => [
+        sessionProductPnl(row, primaryProduct, primaryLegacyKey),
+        sessionProductPnl(row, secondaryProduct, secondaryLegacyKey),
+      ]),
     },
     {
       type: 'line',
@@ -267,13 +321,23 @@ export function MonteCarloPage(): ReactNode {
   ];
   const profitabilitySeries: Highcharts.SeriesOptionsType[] = [
     distributionLineSeries(dashboard.histograms.totalProfitability, 'Total', '#4c6ef5'),
-    distributionLineSeries(dashboard.histograms.emeraldProfitability, 'EMERALDS', '#12b886'),
-    distributionLineSeries(dashboard.histograms.tomatoProfitability, 'TOMATOES', '#fd7e14'),
+    ...order.map(product =>
+      distributionLineSeries(
+        productHistogram(dashboardAny, product, 'productProfitability', product === primaryProduct ? 'emeraldProfitability' : 'tomatoProfitability'),
+        labels[product] ?? product,
+        productColor(dashboardAny, product, product === primaryProduct ? '#12b886' : '#fd7e14'),
+      ),
+    ),
   ];
   const stabilitySeries: Highcharts.SeriesOptionsType[] = [
     distributionLineSeries(dashboard.histograms.totalStability, 'Total', '#4c6ef5'),
-    distributionLineSeries(dashboard.histograms.emeraldStability, 'EMERALDS', '#12b886'),
-    distributionLineSeries(dashboard.histograms.tomatoStability, 'TOMATOES', '#fd7e14'),
+    ...order.map(product =>
+      distributionLineSeries(
+        productHistogram(dashboardAny, product, 'productStability', product === primaryProduct ? 'emeraldStability' : 'tomatoStability'),
+        labels[product] ?? product,
+        productColor(dashboardAny, product, product === primaryProduct ? '#12b886' : '#fd7e14'),
+      ),
+    ),
   ];
 
   return (
@@ -306,10 +370,11 @@ export function MonteCarloPage(): ReactNode {
                     ]}
                   />
                 )}
+                {dashboardAny.meta.round !== undefined && <Badge variant="light">Round {dashboardAny.meta.round}</Badge>}
                 <Badge variant="light">{dashboard.meta.sessionCount} sessions</Badge>
                 <Badge variant="light">{dashboard.meta.bandSessionCount ?? dashboard.meta.sampleSessions} path traces</Badge>
-                <Badge variant="light">{dashboard.meta.fvMode}</Badge>
-                <Badge variant="light">{dashboard.meta.tradeMode}</Badge>
+                {dashboardAny.meta.blockSize !== undefined && <Badge variant="light">block {dashboardAny.meta.blockSize}</Badge>}
+                {dashboardAny.meta.simulationModel !== undefined && <Badge variant="light">{dashboardAny.meta.simulationModel}</Badge>}
               </Group>
             </Group>
           </VisualizerCard>
@@ -341,8 +406,8 @@ export function MonteCarloPage(): ReactNode {
                   <Table.Th>Metric</Table.Th>
                   <Table.Th>Meaning</Table.Th>
                   <Table.Th>Total</Table.Th>
-                  <Table.Th>EMERALDS</Table.Th>
-                  <Table.Th>TOMATOES</Table.Th>
+                  <Table.Th>{labels[primaryProduct] ?? primaryProduct}</Table.Th>
+                  <Table.Th>{labels[secondaryProduct] ?? secondaryProduct}</Table.Th>
                 </Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -350,29 +415,29 @@ export function MonteCarloPage(): ReactNode {
                   <Table.Td>Profitability</Table.Td>
                   <Table.Td>Mean fitted MTM slope in dollars per step.</Table.Td>
                   <Table.Td>{formatSlope(totalTrend.profitability.mean)}</Table.Td>
-                  <Table.Td>{formatSlope(emeraldTrend.profitability.mean)}</Table.Td>
-                  <Table.Td>{formatSlope(tomatoTrend.profitability.mean)}</Table.Td>
+                  <Table.Td>{formatSlope(primaryTrend.profitability.mean)}</Table.Td>
+                  <Table.Td>{formatSlope(secondaryTrend.profitability.mean)}</Table.Td>
                 </Table.Tr>
                 <Table.Tr>
                   <Table.Td>Stability</Table.Td>
                   <Table.Td>Mean linear-fit R². Higher means steadier PnL paths.</Table.Td>
                   <Table.Td>{formatNumber(totalTrend.stability.mean, 3)}</Table.Td>
-                  <Table.Td>{formatNumber(emeraldTrend.stability.mean, 3)}</Table.Td>
-                  <Table.Td>{formatNumber(tomatoTrend.stability.mean, 3)}</Table.Td>
+                  <Table.Td>{formatNumber(primaryTrend.stability.mean, 3)}</Table.Td>
+                  <Table.Td>{formatNumber(secondaryTrend.stability.mean, 3)}</Table.Td>
                 </Table.Tr>
                 <Table.Tr>
                   <Table.Td>Profitability 1σ</Table.Td>
                   <Table.Td>Cross-session spread of profitability.</Table.Td>
                   <Table.Td>{formatSlope(totalTrend.profitability.std)}</Table.Td>
-                  <Table.Td>{formatSlope(emeraldTrend.profitability.std)}</Table.Td>
-                  <Table.Td>{formatSlope(tomatoTrend.profitability.std)}</Table.Td>
+                  <Table.Td>{formatSlope(primaryTrend.profitability.std)}</Table.Td>
+                  <Table.Td>{formatSlope(secondaryTrend.profitability.std)}</Table.Td>
                 </Table.Tr>
                 <Table.Tr>
                   <Table.Td>Stability 1σ</Table.Td>
                   <Table.Td>Cross-session spread of stability.</Table.Td>
                   <Table.Td>{formatNumber(totalTrend.stability.std, 3)}</Table.Td>
-                  <Table.Td>{formatNumber(emeraldTrend.stability.std, 3)}</Table.Td>
-                  <Table.Td>{formatNumber(tomatoTrend.stability.std, 3)}</Table.Td>
+                  <Table.Td>{formatNumber(primaryTrend.stability.std, 3)}</Table.Td>
+                  <Table.Td>{formatNumber(secondaryTrend.stability.std, 3)}</Table.Td>
                 </Table.Tr>
               </Table.Tbody>
             </Table>
@@ -380,27 +445,20 @@ export function MonteCarloPage(): ReactNode {
         </Grid.Col>
 
         <Grid.Col span={{ base: 12, lg: 4 }}>
-          <VisualizerCard title="Fair Value Models">
+          <VisualizerCard title="Market Model">
             <Table withTableBorder withColumnBorders>
               <Table.Tbody>
-                <Table.Tr>
-                  <Table.Td>EMERALDS</Table.Td>
-                  <Table.Td>
-                    <Text fw={500}>{dashboard.generatorModel.EMERALDS.formula}</Text>
-                    <Text size="sm" c="dimmed">
-                      {dashboard.generatorModel.EMERALDS.notes[0]}
-                    </Text>
-                  </Table.Td>
-                </Table.Tr>
-                <Table.Tr>
-                  <Table.Td>TOMATOES</Table.Td>
-                  <Table.Td>
-                    <Text fw={500}>{dashboard.generatorModel.TOMATOES.formula}</Text>
-                    <Text size="sm" c="dimmed">
-                      {dashboard.generatorModel.TOMATOES.notes[0]}
-                    </Text>
-                  </Table.Td>
-                </Table.Tr>
+                {order.map(product => (
+                  <Table.Tr key={product}>
+                    <Table.Td>{labels[product] ?? product}</Table.Td>
+                    <Table.Td>
+                      <Text fw={500}>{dashboard.generatorModel[product]?.formula ?? 'N/A'}</Text>
+                      <Text size="sm" c="dimmed">
+                        {dashboard.generatorModel[product]?.notes?.[0] ?? 'No model notes available'}
+                      </Text>
+                    </Table.Td>
+                  </Table.Tr>
+                ))}
               </Table.Tbody>
             </Table>
           </VisualizerCard>
@@ -410,10 +468,10 @@ export function MonteCarloPage(): ReactNode {
           <SummaryTable title="Total PnL Summary" stats={dashboard.overall.totalPnl} />
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 4 }}>
-          <SummaryTable title="EMERALDS PnL Summary" stats={dashboard.products.EMERALDS.pnl} />
+          <SummaryTable title={`${labels[primaryProduct] ?? primaryProduct} PnL Summary`} stats={productSummary(dashboardAny, primaryProduct)} />
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 4 }}>
-          <SummaryTable title="TOMATOES PnL Summary" stats={dashboard.products.TOMATOES.pnl} />
+          <SummaryTable title={`${labels[secondaryProduct] ?? secondaryProduct} PnL Summary`} stats={productSummary(dashboardAny, secondaryProduct)} />
         </Grid.Col>
 
         <Grid.Col span={{ base: 12, md: 6 }}>
@@ -433,29 +491,29 @@ export function MonteCarloPage(): ReactNode {
             subtitle={`corr ${formatNumber(scatterFit.correlation, 3)} · fit R² ${formatNumber(scatterFit.r2, 3)} · ${scatterFit.diagnosis}`}
             series={scatterSeries}
             options={{
-              xAxis: { title: { text: 'EMERALDS pnl' } },
-              yAxis: { title: { text: 'TOMATOES pnl' } },
+              xAxis: { title: { text: `${labels[primaryProduct] ?? primaryProduct} pnl` } },
+              yAxis: { title: { text: `${labels[secondaryProduct] ?? secondaryProduct} pnl` } },
             }}
           />
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 6 }}>
           <SimpleChart
-            title="EMERALDS PnL Distribution"
-            subtitle={`Normal fit μ ${formatNumber(dashboard.normalFits.emeraldPnl.mean)} · σ ${formatNumber(dashboard.normalFits.emeraldPnl.std)} · R² ${formatNumber(dashboard.normalFits.emeraldPnl.r2, 3)}`}
-            series={emeraldHistogramSeries}
+            title={`${labels[primaryProduct] ?? primaryProduct} PnL Distribution`}
+            subtitle={`Normal fit μ ${formatNumber(productNormalFit(dashboardAny, primaryProduct, primaryLegacyKey).mean)} · σ ${formatNumber(productNormalFit(dashboardAny, primaryProduct, primaryLegacyKey).std)} · R² ${formatNumber(productNormalFit(dashboardAny, primaryProduct, primaryLegacyKey).r2, 3)}`}
+            series={primaryHistogramSeries}
             options={{
-              xAxis: { title: { text: 'EMERALDS final pnl' } },
+              xAxis: { title: { text: `${labels[primaryProduct] ?? primaryProduct} final pnl` } },
               yAxis: { title: { text: 'Session count' } },
             }}
           />
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 6 }}>
           <SimpleChart
-            title="TOMATOES PnL Distribution"
-            subtitle={`Normal fit μ ${formatNumber(dashboard.normalFits.tomatoPnl.mean)} · σ ${formatNumber(dashboard.normalFits.tomatoPnl.std)} · R² ${formatNumber(dashboard.normalFits.tomatoPnl.r2, 3)}`}
-            series={tomatoHistogramSeries}
+            title={`${labels[secondaryProduct] ?? secondaryProduct} PnL Distribution`}
+            subtitle={`Normal fit μ ${formatNumber(productNormalFit(dashboardAny, secondaryProduct, secondaryLegacyKey).mean)} · σ ${formatNumber(productNormalFit(dashboardAny, secondaryProduct, secondaryLegacyKey).std)} · R² ${formatNumber(productNormalFit(dashboardAny, secondaryProduct, secondaryLegacyKey).r2, 3)}`}
+            series={secondaryHistogramSeries}
             options={{
-              xAxis: { title: { text: 'TOMATOES final pnl' } },
+              xAxis: { title: { text: `${labels[secondaryProduct] ?? secondaryProduct} final pnl` } },
               yAxis: { title: { text: 'Session count' } },
             }}
           />
@@ -499,10 +557,10 @@ export function MonteCarloPage(): ReactNode {
         </Grid.Col>
 
         <Grid.Col span={{ base: 12, md: 6 }}>
-          <SessionRankingTable title="Best Sessions" rows={dashboard.topSessions} />
+          <SessionRankingTable title="Best Sessions" rows={dashboard.topSessions} productOrder={order} productLabels={labels} />
         </Grid.Col>
         <Grid.Col span={{ base: 12, md: 6 }}>
-          <SessionRankingTable title="Worst Sessions" rows={dashboard.bottomSessions} />
+          <SessionRankingTable title="Worst Sessions" rows={dashboard.bottomSessions} productOrder={order} productLabels={labels} />
         </Grid.Col>
 
         {selectedBandSeries && (
@@ -517,7 +575,7 @@ export function MonteCarloPage(): ReactNode {
                     w={220}
                     data={bandOptions}
                     value={bandProduct}
-                    onChange={value => setBandProduct(value ?? 'EMERALDS')}
+                    onChange={value => setBandProduct(value ?? primaryProduct)}
                     allowDeselect={false}
                   />
                 </Group>
@@ -525,21 +583,21 @@ export function MonteCarloPage(): ReactNode {
             </Grid.Col>
             <Grid.Col span={12}>
               <SimpleChart
-                title={`${bandProduct} Fair Value`}
-                series={buildBandChartSeries(selectedBandSeries.fair, bandProduct === 'EMERALDS' ? '#12b886' : '#fd7e14')}
+                title={`${labels[bandProduct] ?? bandProduct} Mid Price Proxy`}
+                series={buildBandChartSeries(selectedBandSeries.fair, productColor(dashboardAny, bandProduct, bandProduct === primaryProduct ? primaryColor : secondaryColor))}
                 options={{
                   xAxis: {
                     title: { text: 'Step' },
                   },
-                  yAxis: { title: { text: 'Fair value' } },
+                  yAxis: { title: { text: 'Price' } },
                 }}
               />
             </Grid.Col>
             <Grid.Col span={12}>
               <SimpleChart
-                title={`${bandProduct} MTM PnL`}
+                title={`${labels[bandProduct] ?? bandProduct} MTM PnL`}
                 series={[
-                  ...buildBandChartSeries(selectedBandSeries.mtmPnl, bandProduct === 'EMERALDS' ? '#12b886' : '#fd7e14'),
+                  ...buildBandChartSeries(selectedBandSeries.mtmPnl, productColor(dashboardAny, bandProduct, bandProduct === primaryProduct ? primaryColor : secondaryColor)),
                   lineSeries('Zero', '#868e96', selectedBandSeries.mtmPnl.timestamps, selectedBandSeries.mtmPnl.timestamps.map(() => 0), 'ShortDash'),
                 ]}
                 options={{
@@ -552,9 +610,9 @@ export function MonteCarloPage(): ReactNode {
             </Grid.Col>
             <Grid.Col span={12}>
               <SimpleChart
-                title={`${bandProduct} Position`}
+                title={`${labels[bandProduct] ?? bandProduct} Position`}
                 series={[
-                  ...buildBandChartSeries(selectedBandSeries.position, bandProduct === 'EMERALDS' ? '#12b886' : '#fd7e14'),
+                  ...buildBandChartSeries(selectedBandSeries.position, productColor(dashboardAny, bandProduct, bandProduct === primaryProduct ? primaryColor : secondaryColor)),
                   lineSeries('Zero', '#868e96', selectedBandSeries.position.timestamps, selectedBandSeries.position.timestamps.map(() => 0), 'ShortDash'),
                 ]}
                 options={{
