@@ -1,4 +1,3 @@
-import sys
 from importlib import metadata
 from pathlib import Path
 from typing import Annotated, Optional
@@ -48,6 +47,8 @@ def cli(
     data: Annotated[
         Optional[Path],
         Option(
+            "--data-root",
+            "--data",
             help="Path to the repo data directory. Both data/ and data/raw/ layouts are supported.",
             show_default=False,
             exists=True,
@@ -69,6 +70,10 @@ def cli(
         int,
         Option("--sample-sessions", help="Number of sessions to persist with full trace data for charts."),
     ] = 10,
+    session_days: Annotated[
+        Optional[int],
+        Option("--session-days", help="Number of synthetic day-equivalents inside each session."),
+    ] = None,
     block_size: Annotated[int, Option("--block-size", help="Mean contiguous block length in ticks.")] = 250,
     seed: Annotated[int, Option("--seed", help="RNG seed for the Monte Carlo bootstrap.")] = 20260419,
     workers: Annotated[int, Option("--workers", help="Worker processes used for independent sessions.")] = 4,
@@ -76,6 +81,10 @@ def cli(
         str,
         Option("--match-trades", help="Replay-engine market-trade matching mode."),
     ] = "all",
+    plot_samples: Annotated[
+        bool,
+        Option("--plot-samples", help="Render PNG plots for each persisted sample session."),
+    ] = False,
     no_progress: Annotated[bool, Option("--no-progress", help="Disable the session progress bar.")] = False,
     version: Annotated[
         bool,
@@ -103,10 +112,12 @@ def cli(
         round_num=round_num,
         sessions=sessions,
         sample_sessions=sample_sessions,
+        session_days=session_days,
         block_size=block_size,
         seed=seed,
         workers=max(1, workers),
         trade_matching_mode=match_trades,
+        plot_samples=plot_samples,
         show_progress=not no_progress,
     )
 
@@ -118,6 +129,10 @@ def cli(
     print(f"Median total PnL: {total_stats['p50']:,.2f}")
     print(f"5%-95% range: {total_stats['p05']:,.2f} to {total_stats['p95']:,.2f}")
     print(f"Saved Monte Carlo dashboard to {dashboard_path}")
+    if dashboard.get("meta", {}).get("plotFiles"):
+        print("Saved sample plots:")
+        for plot_file in dashboard["meta"]["plotFiles"]:
+            print(f"  {plot_file}")
 
     if vis:
         open_dashboard(dashboard_path)

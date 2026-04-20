@@ -7,6 +7,7 @@ import sys
 import time
 import contextlib
 import json
+import socket
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -59,6 +60,9 @@ def _list_runs(current_root: Path) -> tuple[list[dict[str, object]], str | None]
 
 
 class DashboardRequestHandler(SimpleHTTPRequestHandler):
+    def _current_root(self) -> Path:
+        return read_root() or Path(getattr(self, "directory", ".")).resolve()
+
     def do_GET(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path
@@ -69,6 +73,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         if path.startswith(RUN_DASHBOARD_PREFIX):
             self._serve_run_dashboard(path)
             return
+        self.directory = str(self._current_root())
         super().do_GET()
 
     def end_headers(self) -> None:
@@ -82,7 +87,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         return
 
     def _serve_status(self) -> None:
-        root = Path(getattr(self, "directory", ".")).resolve()
+        root = self._current_root()
         dashboard_path = root / "dashboard.json"
         dashboard_exists = dashboard_path.exists()
         runs, current_run_id = _list_runs(root)
@@ -102,7 +107,7 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def _serve_run_dashboard(self, path: str) -> None:
-        root = Path(getattr(self, "directory", ".")).resolve()
+        root = self._current_root()
         runs, _ = _list_runs(root)
         parts = [unquote(part) for part in path.split("/") if part]
         if len(parts) != 4 or parts[:2] != ["__prosperity4mcbt__", "runs"] or parts[3] != "dashboard.json":
@@ -128,10 +133,19 @@ class DashboardRequestHandler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class DashboardHttpServer(ThreadingHTTPServer):
+    allow_reuse_address = False
+
+    def server_bind(self) -> None:
+        if sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def serve_dashboard(root: Path, port: int = 8001) -> None:
     root = root.resolve()
     handler = partial(DashboardRequestHandler, directory=str(root))
-    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    server = DashboardHttpServer(("127.0.0.1", port), handler)
 
     try:
         server.serve_forever()
@@ -142,6 +156,25 @@ def serve_dashboard(root: Path, port: int = 8001) -> None:
 
 
 def is_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+
+    if sys.platform == "win32":
+        import ctypes
+
+        process_query_limited_information = 0x1000
+        synchronize = 0x00100000
+        wait_timeout = 0x00000102
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel32.OpenProcess(process_query_limited_information | synchronize, False, pid)
+        if not handle:
+            return ctypes.get_last_error() == 5
+
+        try:
+            return kernel32.WaitForSingleObject(handle, 0) == wait_timeout
+        finally:
+            kernel32.CloseHandle(handle)
+
     try:
         os.kill(pid, 0)
         return True
@@ -216,11 +249,15 @@ def ensure_dashboard_server(root: Path, port: int = DEFAULT_PORT) -> None:
             return
         terminate_existing_server()
 
+    # Launch from the backtester package root so `python -m prosperity4mcbt.dashboard_server`
+    # resolves correctly even when the parent process started from the repo root.
+    module_cwd = Path(__file__).resolve().parents[1]
     process = subprocess.Popen(
         [sys.executable, "-m", "prosperity4mcbt.dashboard_server", str(root), str(port)],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
+        cwd=str(module_cwd),
     )
     PID_FILE.write_text(str(process.pid))
     wait_for_server(port)

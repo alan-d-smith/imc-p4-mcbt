@@ -6,6 +6,9 @@ export default defineConfig({
   plugins: [react()],
   base: '/',
   server: {
+    host: '127.0.0.1',
+    port: 5555,
+    strictPort: true,
     proxy: {
       '/dashboard.json': 'http://127.0.0.1:8001',
       '/__prosperity4mcbt__': 'http://127.0.0.1:8001',
