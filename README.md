@@ -1,141 +1,190 @@
 # IMC Prosperity 4 Monte Carlo Backtester
 
-Rust-backed Monte Carlo backtesting for IMC Prosperity 4 tutorial-round strategies.
+Round-aware replay and empirical block-bootstrap Monte Carlo tooling for IMC Prosperity strategies.
 
-This repo gives you:
+This checkout currently powers the local workflow in the parent strategy repo. It provides:
 
-- `prosperity4mcbt`: a drop-in Monte Carlo CLI for normal Prosperity Python traders
-- a local dashboard for PnL distributions, profitability, stability, and path bands
-- a legacy replay CLI for historical CSV playback
-- tutorial-round simulation models for `EMERALDS` and `TOMATOES`
+- `python -m prosperity4mcbt` for Monte Carlo simulation
+- `python -m prosperity4mcbt.replay` for exact historical replay
+- a local dashboard bundle plus visualizer integration
+- dynamic product handling based on the supplied CSVs rather than hard-coded tutorial products
 
-You do not need to rewrite your trader for Monte Carlo mode. If your file already exposes a normal `Trader.run(state)` method, it should run.
+You do not need to rewrite your trader for Monte Carlo mode. If your file exposes the normal `Trader.run(state)` interface, it should run.
 
 ## What Works Right Now
 
-- Tutorial-round products: `EMERALDS`, `TOMATOES`
-- One-day Monte Carlo sessions: `10,000` steps per session
-- Default run: `100` sessions, `10` saved path traces
-- Heavy preset: `1000` sessions, `100` saved path traces
-- Local Monte Carlo dashboard
-- Historical replay through the legacy compatibility CLI
+- historical replay for the parent repo's round 1 / round 2 CSV layout
+- empirical block-bootstrap Monte Carlo calibrated from real price and trade data
+- multi-day synthetic sessions with persistent positions, cash, and `traderData`
+- optional PNG plots for persisted sample sessions
+- local visualizer integration through `--vis`
+- dynamic product names in the dashboard and visualizer
+
+In the parent repo, this is currently used for `ASH_COATED_OSMIUM` and `INTARIAN_PEPPER_ROOT`.
 
 ## Prerequisites
 
 You need:
 
 - Python `3.9+`
-- `uv`
-- Rust / Cargo
-- Node / npm
+- Node / npm for the visualizer
 
-Monte Carlo runs call the Rust simulator, and the dashboard is a local Vite frontend.
+If you run this vendored inside the parent repo, the parent Python environment is usually the easiest way to satisfy the dependencies.
 
-## 60-Second Start
+## Typical Workflow
 
-```bash
-git clone https://github.com/chrispyroberts/imc-prosperity-4.git
-cd imc-prosperity-4/backtester
-uv venv
-uv sync
-source .venv/bin/activate
-uv pip install -e .
-cd ..
-```
+The examples below use `python -m ...` so they work even if your shell has not refreshed console-script entrypoints yet.
 
-Run a quick Monte Carlo sweep:
+If you are running from the vendored checkout in the parent repo, start from:
 
 ```bash
-source backtester/.venv/bin/activate
-prosperity4mcbt your_trader.py --quick --out tmp/your_run/dashboard.json
+cd external/imc-p4-mcbt/backtester
 ```
 
-Run the default sweep:
+Then use absolute paths or the vendored relative paths shown below.
+
+## Monte Carlo CLI
+
+Quick smoke test:
 
 ```bash
-source backtester/.venv/bin/activate
-prosperity4mcbt your_trader.py --out tmp/your_run/dashboard.json
+python -m prosperity4mcbt /abs/path/to/trader.py --round 2 --data-root /abs/path/to/data --quick
 ```
 
-Run the heavy sweep:
+Vendored example from `external/imc-p4-mcbt/backtester`:
 
 ```bash
-source backtester/.venv/bin/activate
-prosperity4mcbt your_trader.py --heavy --out tmp/your_run/dashboard.json
+python -m prosperity4mcbt ../../../src/trader.py --round 2 --data-root ../../../data --quick
 ```
+
+More standard run:
+
+```bash
+python -m prosperity4mcbt /abs/path/to/trader.py --round 2 --data-root /abs/path/to/data --sessions 100 --sample-sessions 10
+```
+
+Useful flags:
+
+- `--round 1|2`: choose the round to calibrate from
+- `--data-root PATH` or `--data PATH`: root data directory
+- `--sessions N`: number of Monte Carlo sessions
+- `--sample-sessions N`: number of full sample paths to persist
+- `--session-days N`: synthetic day-equivalents per session
+- `--block-size N`: mean contiguous bootstrap block length in ticks
+- `--workers N`: worker processes for independent sessions
+- `--plot-samples`: save PNG plots for persisted sample sessions
+- `--vis`: open the dashboard in the local visualizer
+- `--out PATH`: dashboard JSON path
+
+### Presets
+
+- default: `100` sessions, `10` sample sessions
+- `--quick`: `25` sessions, `5` sample sessions
+- `--heavy`: `300` sessions, `20` sample sessions
+
+## Replay CLI
+
+Replay all available days in a round:
+
+```bash
+python -m prosperity4mcbt.replay 2 --algorithm /abs/path/to/trader.py --data-root /abs/path/to/data
+```
+
+Vendored example:
+
+```bash
+python -m prosperity4mcbt.replay 2 --algorithm ../../../src/trader.py --data-root ../../../data
+```
+
+Replay one specific day:
+
+```bash
+python -m prosperity4mcbt.replay 2 --algorithm /abs/path/to/trader.py --data-root /abs/path/to/data --day -1
+```
+
+Useful flags:
+
+- `--day D`: replay one day; repeat the flag to replay multiple days
+- `--out PATH`: save merged replay log to a custom path
+- `--no-out`: skip writing the merged replay log
+- `--print`: print trader output inline
+- `--no-progress`: disable the progress bar
+- `--no-merge-pnl`: keep per-day PnL separate in merged output
+- `--original-timestamps`: keep original timestamps across merged days
+- `--match-trades all|worse|none`: replay market-trade matching mode
+
+Replay logs default to:
+
+```text
+backtests/results/mcbt_replay/
+```
+
+relative to the parent strategy repo.
+
+## Visualizer
 
 Start the visualizer:
 
 ```bash
-cd visualizer
+cd ../visualizer
 npm install
 npm run dev
 ```
 
-Then run your backtest with `--vis`:
+Then run Monte Carlo with `--vis`, for example:
 
 ```bash
-cd ..
-source backtester/.venv/bin/activate
-prosperity4mcbt your_trader.py --quick --vis --out tmp/your_run/dashboard.json
+cd ../backtester
+python -m prosperity4mcbt ../../../src/trader.py --round 2 --data-root ../../../data --quick --vis
 ```
 
-That uses the built-in CORS-enabled file server and opens the Monte Carlo route automatically.
-
-For the common local case, the short URL is just:
+The local dashboard is served through:
 
 ```text
 http://127.0.0.1:5555/
 ```
 
-That works because the local visualizer proxies `/dashboard.json` and the related sidecar files to the local dashboard file server on port `8001`.
+The frontend proxies `/dashboard.json` and related sidecar files to the local dashboard server on port `8001`.
 
-If you just want a smoke test, run the bundled starter template unchanged:
+## How Monte Carlo Works
 
-```bash
-source backtester/.venv/bin/activate
-prosperity4mcbt example_trader.py --quick --out tmp/example/dashboard.json
+The current Monte Carlo engine is an empirical, time-aligned block bootstrap built from the supplied historical CSVs.
+
+At a high level it:
+
+1. discovers the available days for the selected round
+2. loads real order books and market trades for every product
+3. normalizes sparse or empty-book moments so synthetic mids stay usable
+4. samples short contiguous blocks from real history while keeping products aligned on the same ticks
+5. reanchors only products with meaningful day-to-day level shifts
+6. carries positions, cash, and `traderData` across synthetic day boundaries
+7. writes a dashboard bundle with distributions, path boards, and sample sessions
+
+This makes it a robustness tool for nearby plausible worlds built from real data. It is not a first-principles market simulator.
+
+## Output Bundle
+
+A Monte Carlo run writes:
+
+- `dashboard.json`
+- `session_summary.csv`
+- `run_summary.csv`
+- `sample_paths/`
+- `sessions/`
+- `plots/` when `--plot-samples` is enabled
+- `run.log`
+
+If `--out` is omitted, the dashboard defaults to:
+
+```text
+backtests/results/mcbt_monte_carlo/<timestamp>/dashboard.json
 ```
 
-## CLI Presets
-
-`prosperity4mcbt` supports two useful presets:
-
-- default
-  - `100` sessions
-  - `10` sample sessions
-- `--quick`
-  - `100` sessions
-  - `10` sample sessions
-- `--heavy`
-  - `1000` sessions
-  - `100` sample sessions
-
-Bare `prosperity4mcbt your_trader.py` now uses the quick-sized default:
-
-```bash
-prosperity4mcbt your_trader.py
-```
-
-You can still override counts manually:
-
-```bash
-prosperity4mcbt your_trader.py --sessions 3000 --sample-sessions 150
-```
-
-## What `sample-sessions` Means
-
-- `sessions` controls how many Monte Carlo runs are used for the statistics
-- `sample-sessions` controls how many full path traces are saved for the dashboard charts
-
-So:
-
-- bigger `sessions` improves the statistical estimates
-- bigger `sample-sessions` makes the dashboard heavier
+relative to the parent strategy repo.
 
 ## Strategy Contract
 
-Your strategy only needs to expose the normal Prosperity interface:
+Your strategy only needs the normal Prosperity interface:
 
 ```python
 class Trader:
@@ -145,202 +194,42 @@ class Trader:
 
 `prosperity4mcbt` handles:
 
-- order book generation
-- trade simulation
-- path tracing
-- cash / position accounting
+- state preparation
+- replay-style order matching
+- cash and position accounting
 - mark-to-market PnL
 - dashboard bundle generation
 
 No special visualizer logger is required for Monte Carlo mode.
 
-Compatible import styles:
+Compatible import styles include:
 
 - `from datamodel import ...`
 - `from prosperity3bt.datamodel import ...`
 - `from prosperity4mcbt.datamodel import ...`
 
-Tutorial-round Monte Carlo currently provides empty observations and does not simulate conversions, because the tutorial products do not use them.
-
-## How It Works
-
-The Monte Carlo engine is built from the tutorial-round CSVs in `data/round0/`. The goal is not to replay the exact two observed days, but to reproduce the same visible market structure and trade distributions with a simple generative model.
-
-### 1. Fair value model
-
-- `EMERALDS` uses a fixed fair value:
-  - `F_t = 10000`
-- `TOMATOES` uses a zero-drift latent fair process:
-  - `x_{t+1} = x_t + ε_t`
-
-The TOMATOES process is calibrated from the tutorial data so the simulated visible book reproduces the observed stationary-vs-drifting behavior and the same rough spread / trade statistics.
-
-### 2. Order book placement bots
-
-Each step starts by generating bot quotes around fair value.
-
-- Bot 1 posts the outer symmetric wall
-- Bot 2 posts the inner symmetric wall
-- Bot 3 optionally posts a one-sided inside quote
-
-The same architecture is used on both products, with product-specific parameters inferred from the data:
-
-- `EMERALDS`
-  - outer wall around `F_t ± 10`
-  - inner wall around `F_t ± 8`
-- `TOMATOES`
-  - outer wall around `x_t ± 8`
-  - inner wall around `x_t ± 6.5`
-  - an optional one-sided inside bot near fair
-
-Visible integer prices come from deterministic rounding of those quote targets, which is why the tutorial book shows stable discrete patterns instead of arbitrary noise.
-
-### 3. Bot trade flow
-
-After the book is built:
-
-- your `Trader.run(state)` sees the bot-only book
-- your orders cross immediately if marketable
-- your resting orders stay in the book
-- simulated bot takers then hit the best bid / ask
-
-Trade timing, side mix, and size distributions are sampled from statistics measured from the tutorial trade CSVs, so the fill process matches the observed tutorial market more closely than a generic random-execution model.
-
-### 4. Parameter inference
-
-The simulator parameters come from direct measurement of the tutorial files:
-
-- fair-value behavior from the two tutorial price paths
-- wall spreads and sizes from repeated order book states
-- Bot 3 presence, side, and size from one-sided inside quotes
-- taker timing, side, and size from the trade logs
-
-## Output Bundle
-
-A run writes:
-
-- `dashboard.json`
-- `session_summary.csv`
-- `run_summary.csv`
-- `sample_paths/`
-- `sessions/`
-
-Typical command:
-
-```bash
-prosperity4mcbt your_trader.py --out tmp/your_run/dashboard.json
-```
-
-## Dashboard Screenshots
-
-### Overview and summary metrics
-
-![Monte Carlo dashboard overview](docs/screenshots/monte-carlo-dashboard-overview.png)
-
-### Distributions and cross-product diagnostics
-
-![Monte Carlo dashboard distributions](docs/screenshots/monte-carlo-dashboard-distributions.png)
-
-### Best/worst session tables
-
-![Monte Carlo dashboard session tables](docs/screenshots/monte-carlo-dashboard-sessions.png)
-
-### Path boards
-
-![Monte Carlo dashboard path boards](docs/screenshots/monte-carlo-dashboard-path-boards.png)
-
-## Baseline Monte Carlo Results
-
-The repo includes the official IMC starter trader template in [example_trader.py](example_trader.py). That file still uses `acceptable_price = 10`, so it is intentionally a bad strategy until you replace its fair-value logic.
-
-To make the README concrete, the official IMC starter trader was run with the heavy preset:
-
-- `1000` sessions
-- `100` sample sessions
-- single-day sessions
-- tutorial-round simulation model
-
-### Official Starter Baseline
-
-| Strategy | Mean Total PnL | Total PnL Std | P05 | P95 | Profitability | Stability `R²` | EMERALDS Mean PnL | TOMATOES Mean PnL |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| IMC starter `example_trader.py` | `-1,427.08` | `4,437.36` | `-8,840.35` | `5,764.00` | `-0.0114 $/step` | `0.4273` | `-645.95` | `-781.13` |
-
-Interpretation:
-
-- the official starter trader is just a template, not a competitive baseline
-- its `acceptable_price = 10` placeholder makes it systematically wrong for tutorial-round products
-
-## Performance
-
-Measured on this machine:
-
-- `prosperity4mcbt example_trader.py --heavy`
-- `1000` sessions
-- `100` sample sessions
-
-Observed runtime:
-
-- wall time: `55.70s`
-- effective CPU utilization: about `10.3x`
-- machine logical CPUs: `14`
-
-Parallelization model:
-
-- Monte Carlo sessions run in parallel with Rayon
-- each session is independent
-- parallelism happens across sessions, not inside a single session
-
-## Historical Replay
-
-This repo still includes the legacy replay CLI for standard CSV playback:
-
-```bash
-source backtester/.venv/bin/activate
-prosperity3bt your_trader.py 0 --data data
-```
-
-Use `prosperity3bt` if you want historical replay.
-
-Use `prosperity4mcbt` if you want Monte Carlo simulation.
+Monte Carlo still uses minimal observations and does not currently simulate conversions, which is fine for the current round 1 / round 2 products in the parent repo.
 
 ## Repo Layout
 
 ```text
-prosperity4/
-├── backtester/         # Python CLIs and dashboard bundle builder
-├── rust_simulator/     # Rust simulation engine
-├── visualizer/         # local visualizer frontend
-├── scripts/            # helper scripts and Python strategy worker
-├── data/               # tutorial-round CSV data
-├── example_trader.py   # official IMC starter trader template
-├── starter.py          # simple example strategy
-├── test_algo.py        # simple local test strategy
-└── docs/               # README screenshots
-```
-
-## Mark-to-Market
-
-`MTM` means mark-to-market.
-
-It answers one question:
-
-- what is the strategy worth right now?
-
-Formula:
-
-```text
-cash + open inventory valued at current fair value
+imc-p4-mcbt/
+|-- backtester/         # Python CLIs and dashboard bundle builder
+|-- rust_simulator/     # Rust simulator experiments
+|-- visualizer/         # local visualizer frontend
+|-- scripts/            # helper scripts
+|-- data/               # legacy local data and calibration artifacts
+`-- docs/               # screenshots and notes
 ```
 
 ## Attribution
 
-This project includes adapted components from jmerle's open-source IMC Prosperity 3 tooling:
+This project includes adapted components from Jasper van Merle's open-source IMC Prosperity 3 tooling:
 
 - backtester lineage: https://github.com/jmerle/imc-prosperity-3-backtester
 - visualizer lineage: https://github.com/jmerle/imc-prosperity-3-visualizer
 
-The historical replay CLI and parts of the visualizer shell started from those projects and were then modified for Prosperity 4 research. The Rust simulator, Monte Carlo engine, dashboard data model, tutorial-round market-structure analysis, and the Monte Carlo visualizer route are original additions in this repo.
+The historical replay CLI and parts of the visualizer shell started from those projects and were then extended for the current Prosperity 4 research workflow.
 
 ## Open-Source Hygiene
 
@@ -355,4 +244,4 @@ Local auth tokens live outside the repo in `~/.prosperity4mcbt/`.
 
 ## Status
 
-This repo is tuned for tutorial-round research and fast local experimentation. The Monte Carlo simulator is intended for strategy comparison and robustness testing, not as a claim of exact official-market reconstruction.
+This checkout is tuned for fast local strategy iteration inside the parent repo. The replay path is intended for exact historical measurement, and the Monte Carlo path is intended for robustness testing on synthetic sessions derived from real data.
