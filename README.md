@@ -6,6 +6,7 @@ This checkout currently powers the local workflow in the parent strategy repo. I
 
 - `python -m prosperity4mcbt` for Monte Carlo simulation
 - `python -m prosperity4mcbt.replay` for exact historical replay
+- `python -m prosperity4mcbt.pbo` for CSCV-style Probability of Backtest Overfitting
 - a local dashboard bundle plus visualizer integration
 - dynamic product handling based on the supplied CSVs rather than hard-coded tutorial products
 
@@ -19,6 +20,7 @@ You do not need to rewrite your trader for Monte Carlo mode. If your file expose
 - optional PNG plots for persisted sample sessions
 - local visualizer integration through `--vis`
 - dynamic product names in the dashboard and visualizer
+- CSCV-based PBO across multiple candidate trader files
 
 In the parent repo, this is currently used for `ASH_COATED_OSMIUM` and `INTARIAN_PEPPER_ROOT`.
 
@@ -120,6 +122,41 @@ backtests/results/mcbt_replay/
 ```
 
 relative to the parent strategy repo.
+
+## PBO CLI
+
+PBO is only meaningful if you compare multiple candidate traders.
+
+Quick example:
+
+```bash
+python -m prosperity4mcbt.pbo --round 2 --algorithm /abs/path/to/a.py --algorithm /abs/path/to/b.py
+```
+
+Vendored example from `external/imc-p4-mcbt/backtester`:
+
+```bash
+python -m prosperity4mcbt.pbo --round 2 --algorithm ../../../src/trader.py --algorithm ../../../submissions/round2/trader.py
+```
+
+Useful flags:
+
+- `--trials N`: number of synthetic day-equivalent trials
+- `--groups N`: number of even CSCV groups; must divide `--trials`
+- `--metric mean_pnl|sum_pnl|median_pnl|sharpe_like|sortino_like`: fold ranking metric
+- `--block-size N`: mean block-bootstrap chunk length
+- `--seed N`: RNG seed
+- `--workers N`: parallel workers across candidate algorithms
+
+If you omit `--algorithm`, the parent repo workflow defaults to `src/trader.py` plus `submissions/roundX/*.py`.
+
+Outputs land under:
+
+```text
+backtests/results/mcbt_pbo/
+```
+
+and include `pbo.json`, CSV summaries, and static PNG plots.
 
 ## Visualizer
 

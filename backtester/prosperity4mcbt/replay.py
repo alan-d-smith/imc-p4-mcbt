@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from functools import reduce
-from importlib import reload
 from pathlib import Path
 
 from prosperity4mcbt.repo import (
@@ -159,17 +158,15 @@ def main() -> None:
     if not data_root.is_dir():
         raise FileNotFoundError(f"Data root not found: {data_root}")
 
-    trader_module = load_trader_module(algorithm)
-    if not hasattr(trader_module, "Trader"):
-        raise ValueError(f"{algorithm} does not expose a Trader class")
-
     file_reader = RepoFileReader(data_root)
     days = discover_days(file_reader, args.round, args.days)
 
     results = []
     for day_num in days:
         print(f"Backtesting {algorithm} on round {args.round} day {day_num}")
-        reload(trader_module)
+        trader_module = load_trader_module(algorithm)
+        if not hasattr(trader_module, "Trader"):
+            raise ValueError(f"{algorithm} does not expose a Trader class")
 
         result = run_backtest(
             trader_module.Trader(),

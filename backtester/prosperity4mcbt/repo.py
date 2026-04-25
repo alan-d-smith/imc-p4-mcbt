@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import importlib.util
 import re
 import sys
 from contextlib import contextmanager
-from importlib import import_module
 from pathlib import Path
 from typing import Iterator
 
@@ -11,6 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_DATA_ROOT = REPO_ROOT / "data"
 DEFAULT_REPLAY_RESULTS_DIR = REPO_ROOT / "backtests" / "results" / "mcbt_replay"
 DEFAULT_MONTE_CARLO_RESULTS_DIR = REPO_ROOT / "backtests" / "results" / "mcbt_monte_carlo"
+DEFAULT_PBO_RESULTS_DIR = REPO_ROOT / "backtests" / "results" / "mcbt_pbo"
 POSITION_LIMITS = {
     "ASH_COATED_OSMIUM": 80,
     "INTARIAN_PEPPER_ROOT": 80,
@@ -70,12 +72,26 @@ class RepoFileReader(FileReader):
         return wrap_in_context_manager(None)
 
 
+def trader_module_name(algorithm: Path) -> str:
+    digest = hashlib.sha1(str(algorithm.resolve()).encode("utf-8")).hexdigest()[:12]
+    return f"prosperity4mcbt_algo_{algorithm.stem}_{digest}"
+
+
 def load_trader_module(algorithm: Path):
     algorithm = algorithm.resolve()
     algorithm_dir = str(algorithm.parent)
     if algorithm_dir not in sys.path:
         sys.path.insert(0, algorithm_dir)
-    return import_module(algorithm.stem)
+
+    module_name = trader_module_name(algorithm)
+    spec = importlib.util.spec_from_file_location(module_name, algorithm)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load Python module from {algorithm}")
+
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def discover_days(file_reader: RepoFileReader, round_num: int, requested_days: list[int] | None) -> list[int]:

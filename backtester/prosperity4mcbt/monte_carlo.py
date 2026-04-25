@@ -11,7 +11,6 @@ from collections import defaultdict
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
-from importlib import reload
 from pathlib import Path
 from typing import Any, Optional
 
@@ -858,7 +857,6 @@ def run_session_task(task: tuple[int, int]) -> dict[str, Any]:
     keep_session_files = session_id <= ctx.sample_sessions
     product_order = list(ctx.dataset.products)
     trader_module = load_trader_module(ctx.algorithm)
-    reload(trader_module)
     trader = trader_module.Trader()
     combined_path = {
         "products": {product: empty_product_path() for product in ctx.dataset.products},
