@@ -80,7 +80,7 @@ def cli(
     match_trades: Annotated[
         str,
         Option("--match-trades", help="Replay-engine market-trade matching mode."),
-    ] = "all",
+    ] = "worse",
     plot_samples: Annotated[
         bool,
         Option("--plot-samples", help="Render PNG plots for each persisted sample session."),

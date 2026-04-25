@@ -594,7 +594,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--match-trades",
         choices=[mode.value for mode in TradeMatchingMode],
-        default=TradeMatchingMode.all.value,
+        default=TradeMatchingMode.worse.value,
         help="Replay-engine market-trade matching mode.",
     )
     parser.add_argument("--no-progress", action="store_true")

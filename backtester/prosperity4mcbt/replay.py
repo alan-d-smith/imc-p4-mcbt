@@ -141,7 +141,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--match-trades",
         choices=[mode.value for mode in TradeMatchingMode],
-        default=TradeMatchingMode.all.value,
+        default=TradeMatchingMode.worse.value,
         help="Market-trade matching mode passed to the replay engine.",
     )
     return parser.parse_args()

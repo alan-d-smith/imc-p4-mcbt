@@ -14,7 +14,7 @@ You do not need to rewrite your trader for Monte Carlo mode. If your file expose
 
 ## What Works Right Now
 
-- historical replay for the parent repo's round 1 / round 2 CSV layout
+- historical replay for the parent repo's round 1 / 2 / 3 CSV layout
 - empirical block-bootstrap Monte Carlo calibrated from real price and trade data
 - multi-day synthetic sessions with persistent positions, cash, and `traderData`
 - optional PNG plots for persisted sample sessions
@@ -22,7 +22,7 @@ You do not need to rewrite your trader for Monte Carlo mode. If your file expose
 - dynamic product names in the dashboard and visualizer
 - CSCV-based PBO across multiple candidate trader files
 
-In the parent repo, this is currently used for `ASH_COATED_OSMIUM` and `INTARIAN_PEPPER_ROOT`.
+In the parent repo, this is currently used for the active round assets as they are released.
 
 ## Prerequisites
 
@@ -67,7 +67,7 @@ python -m prosperity4mcbt /abs/path/to/trader.py --round 2 --data-root /abs/path
 
 Useful flags:
 
-- `--round 1|2`: choose the round to calibrate from
+- `--round 1|2|3`: choose the round to calibrate from
 - `--data-root PATH` or `--data PATH`: root data directory
 - `--sessions N`: number of Monte Carlo sessions
 - `--sample-sessions N`: number of full sample paths to persist
@@ -113,7 +113,7 @@ Useful flags:
 - `--no-progress`: disable the progress bar
 - `--no-merge-pnl`: keep per-day PnL separate in merged output
 - `--original-timestamps`: keep original timestamps across merged days
-- `--match-trades all|worse|none`: replay market-trade matching mode
+- `--match-trades worse|all|none`: replay market-trade matching mode; `worse` is the default because it is stricter and better matched the observed round 3 IMC backtester slice
 
 Replay logs default to:
 
@@ -245,7 +245,7 @@ Compatible import styles include:
 - `from prosperity3bt.datamodel import ...`
 - `from prosperity4mcbt.datamodel import ...`
 
-Monte Carlo still uses minimal observations and does not currently simulate conversions, which is fine for the current round 1 / round 2 products in the parent repo.
+Monte Carlo still uses minimal observations and does not currently simulate conversions, which is fine for the current released products in the parent repo.
 
 ## Repo Layout
 
