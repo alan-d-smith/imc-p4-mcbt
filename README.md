@@ -14,9 +14,10 @@ You do not need to rewrite your trader for Monte Carlo mode. If your file expose
 
 ## What Works Right Now
 
-- historical replay for the parent repo's round 1 / 2 / 3 CSV layout
+- historical replay for the parent repo's round 1 / 2 / 3 / 4 CSV layout
 - empirical block-bootstrap Monte Carlo calibrated from real price and trade data
 - multi-day synthetic sessions with persistent positions, cash, and `traderData`
+- parsed dataset caching under `backtests/results/mcbt_cache/` for faster repeated runs
 - optional PNG plots for persisted sample sessions
 - local visualizer integration through `--vis`
 - dynamic product names in the dashboard and visualizer
@@ -67,7 +68,7 @@ python -m prosperity4mcbt /abs/path/to/trader.py --round 2 --data-root /abs/path
 
 Useful flags:
 
-- `--round 1|2|3`: choose the round to calibrate from
+- `--round 1|2|3|4`: choose the round to calibrate from
 - `--data-root PATH` or `--data PATH`: root data directory
 - `--sessions N`: number of Monte Carlo sessions
 - `--sample-sessions N`: number of full sample paths to persist
@@ -83,6 +84,13 @@ Useful flags:
 - default: `100` sessions, `10` sample sessions
 - `--quick`: `25` sessions, `5` sample sessions
 - `--heavy`: `300` sessions, `20` sample sessions
+
+Performance notes:
+
+- Repeated runs on unchanged CSVs reuse a parsed dataset cache. The cache key includes source file size and mtime, so
+  edits to `prices_*.csv` or `trades_*.csv` automatically rebuild it.
+- Use `--sample-sessions 0` for faster numerical-only checks when you do not need persisted session CSVs or path plots.
+- Let `--workers` default for normal research runs; force `--workers 1` only when debugging.
 
 ## Replay CLI
 

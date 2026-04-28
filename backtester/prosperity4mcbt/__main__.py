@@ -4,7 +4,12 @@ from typing import Annotated, Optional
 
 from typer import Argument, Option, Typer
 
-from prosperity4mcbt.monte_carlo import default_dashboard_path, normalize_dashboard_path, run_monte_carlo_mode
+from prosperity4mcbt.monte_carlo import (
+    default_dashboard_path,
+    normalize_dashboard_path,
+    run_monte_carlo_mode,
+    worker_default_count,
+)
 from prosperity4mcbt.open import open_dashboard
 
 
@@ -76,7 +81,10 @@ def cli(
     ] = None,
     block_size: Annotated[int, Option("--block-size", help="Mean contiguous block length in ticks.")] = 250,
     seed: Annotated[int, Option("--seed", help="RNG seed for the Monte Carlo bootstrap.")] = 20260419,
-    workers: Annotated[int, Option("--workers", help="Worker processes used for independent sessions.")] = 4,
+    workers: Annotated[
+        int,
+        Option("--workers", help="Worker processes used for independent sessions."),
+    ] = worker_default_count(),
     match_trades: Annotated[
         str,
         Option("--match-trades", help="Replay-engine market-trade matching mode."),

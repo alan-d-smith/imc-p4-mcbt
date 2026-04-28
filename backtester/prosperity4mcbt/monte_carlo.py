@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import math
 import os
+import pickle
 import random
 import shutil
 import statistics
@@ -78,6 +80,8 @@ GENERATED_OUTPUT_DIRS = {
     "sample_paths",
     "sessions",
 }
+DATASET_CACHE_VERSION = 1
+DATASET_CACHE_DIR = REPO_ROOT / "backtests" / "results" / "mcbt_cache"
 
 WORKER_CONTEXT: WorkerContext | None = None
 
@@ -124,6 +128,22 @@ class HistoricalPriceRow:
             profit_loss=0.0,
         )
 
+    def to_shifted_backtest_row(self, day: int, timestamp: int, price_delta: int) -> bt_data.PriceRow:
+        if price_delta == 0:
+            return self.to_backtest_row(day, timestamp)
+
+        return bt_data.PriceRow(
+            day=day,
+            timestamp=timestamp,
+            product=self.product,
+            bid_prices=[price + price_delta for price in self.bid_prices],
+            bid_volumes=list(self.bid_volumes),
+            ask_prices=[price + price_delta for price in self.ask_prices],
+            ask_volumes=list(self.ask_volumes),
+            mid_price=self.mid_price + price_delta,
+            profit_loss=0.0,
+        )
+
     def to_csv_line(self, day: int, timestamp: int) -> str:
         values = [str(day), str(timestamp), self.product]
 
@@ -138,6 +158,25 @@ class HistoricalPriceRow:
             values.extend([str(ask_price) if ask_price != "" else "", str(ask_volume) if ask_volume != "" else ""])
 
         values.extend([f"{self.mid_price}", "0.0"])
+        return ";".join(values)
+
+    def to_shifted_csv_line(self, day: int, timestamp: int, price_delta: int) -> str:
+        if price_delta == 0:
+            return self.to_csv_line(day, timestamp)
+
+        values = [str(day), str(timestamp), self.product]
+
+        for level in range(3):
+            bid_price = self.bid_prices[level] + price_delta if level < len(self.bid_prices) else ""
+            bid_volume = self.bid_volumes[level] if level < len(self.bid_volumes) else ""
+            values.extend([str(bid_price) if bid_price != "" else "", str(bid_volume) if bid_volume != "" else ""])
+
+        for level in range(3):
+            ask_price = self.ask_prices[level] + price_delta if level < len(self.ask_prices) else ""
+            ask_volume = self.ask_volumes[level] if level < len(self.ask_volumes) else ""
+            values.extend([str(ask_price) if ask_price != "" else "", str(ask_volume) if ask_volume != "" else ""])
+
+        values.extend([f"{self.mid_price + price_delta}", "0.0"])
         return ";".join(values)
 
 
@@ -168,6 +207,16 @@ class HistoricalTradeRow:
             timestamp=timestamp,
         )
 
+    def to_shifted_trade(self, timestamp: int, price_delta: int) -> Trade:
+        return Trade(
+            symbol=self.symbol,
+            price=self.price + price_delta,
+            quantity=self.quantity,
+            buyer=self.buyer,
+            seller=self.seller,
+            timestamp=timestamp,
+        )
+
     def to_csv_line(self, timestamp: int) -> str:
         return ";".join(
             [
@@ -177,6 +226,22 @@ class HistoricalTradeRow:
                 self.symbol,
                 "XIRECS",
                 f"{float(self.price)}",
+                str(self.quantity),
+            ]
+        )
+
+    def to_shifted_csv_line(self, timestamp: int, price_delta: int) -> str:
+        if price_delta == 0:
+            return self.to_csv_line(timestamp)
+
+        return ";".join(
+            [
+                str(timestamp),
+                self.buyer,
+                self.seller,
+                self.symbol,
+                "XIRECS",
+                f"{float(self.price + price_delta)}",
                 str(self.quantity),
             ]
         )
@@ -255,6 +320,16 @@ def read_csv_rows(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(handle, delimiter=";"))
 
 
+def parse_int_columns(columns: list[str], indices: tuple[int, int, int]) -> tuple[int, ...]:
+    values: list[int] = []
+    for index in indices:
+        value = columns[index]
+        if value == "":
+            break
+        values.append(int(value))
+    return tuple(values)
+
+
 def parse_price_row(row: dict[str, str]) -> HistoricalPriceRow:
     bid_prices = tuple(int(row[f"bid_price_{level}"]) for level in range(1, 4) if row[f"bid_price_{level}"] != "")
     bid_volumes = tuple(int(row[f"bid_volume_{level}"]) for level in range(1, 4) if row[f"bid_volume_{level}"] != "")
@@ -267,6 +342,17 @@ def parse_price_row(row: dict[str, str]) -> HistoricalPriceRow:
         ask_prices=ask_prices,
         ask_volumes=ask_volumes,
         mid_price=float(row["mid_price"]),
+    )
+
+
+def parse_price_columns(columns: list[str]) -> HistoricalPriceRow:
+    return HistoricalPriceRow(
+        product=columns[2],
+        bid_prices=parse_int_columns(columns, (3, 5, 7)),
+        bid_volumes=parse_int_columns(columns, (4, 6, 8)),
+        ask_prices=parse_int_columns(columns, (9, 11, 13)),
+        ask_volumes=parse_int_columns(columns, (10, 12, 14)),
+        mid_price=float(columns[15]),
     )
 
 
@@ -324,7 +410,55 @@ def parse_trade_row(row: dict[str, str]) -> HistoricalTradeRow:
     )
 
 
+def parse_trade_columns(columns: list[str]) -> HistoricalTradeRow:
+    return HistoricalTradeRow(
+        symbol=columns[3],
+        price=int(float(columns[5])),
+        quantity=int(columns[6]),
+        buyer=columns[1],
+        seller=columns[2],
+    )
+
+
+def dataset_cache_path(data_root: Path, round_num: int, target_days: tuple[int, ...]) -> Path:
+    file_reader = RepoFileReader(data_root)
+    parts = [f"version={DATASET_CACHE_VERSION}", f"data_root={data_root.resolve()}", f"round={round_num}"]
+    for day_num in target_days:
+        parts.append(f"day={day_num}")
+        for kind in ("prices", "trades"):
+            with file_reader.file([f"round{round_num}", f"{kind}_round_{round_num}_day_{day_num}.csv"]) as file:
+                if file is None:
+                    parts.append(f"{kind}=missing")
+                    continue
+                stat = file.stat()
+                parts.append(f"{kind}={file.resolve()}:{stat.st_size}:{stat.st_mtime_ns}")
+
+    digest = hashlib.sha1("|".join(parts).encode("utf-8")).hexdigest()[:16]
+    day_part = "_".join(str(day_num).replace("-", "m") for day_num in target_days)
+    return DATASET_CACHE_DIR / f"round{round_num}_days_{day_part}_{digest}.pickle"
+
+
 def load_round_dataset(data_root: Path, round_num: int, target_days: tuple[int, ...]) -> RoundDataset:
+    cache_path = dataset_cache_path(data_root, round_num, target_days)
+    if cache_path.is_file():
+        try:
+            with cache_path.open("rb") as handle:
+                cached = pickle.load(handle)
+            if isinstance(cached, RoundDataset):
+                return cached
+        except Exception:
+            cache_path.unlink(missing_ok=True)
+
+    dataset = load_round_dataset_uncached(data_root, round_num, target_days)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = cache_path.with_suffix(".tmp")
+    with temporary_path.open("wb") as handle:
+        pickle.dump(dataset, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    temporary_path.replace(cache_path)
+    return dataset
+
+
+def load_round_dataset_uncached(data_root: Path, round_num: int, target_days: tuple[int, ...]) -> RoundDataset:
     file_reader = RepoFileReader(data_root)
     source_days: list[SourceDay] = []
     products: set[str] = set()
@@ -334,27 +468,31 @@ def load_round_dataset(data_root: Path, round_num: int, target_days: tuple[int, 
         with file_reader.file([f"round{round_num}", f"prices_round_{round_num}_day_{day_num}.csv"]) as file:
             if file is None:
                 raise FileNotFoundError(f"Missing prices for round {round_num} day {day_num}")
-            price_rows = read_csv_rows(file)
 
-        prices_by_tick: list[dict[str, HistoricalPriceRow]] = [dict() for _ in range(TICKS_PER_DAY)]
-        for row in price_rows:
-            timestamp = int(row["timestamp"])
-            tick_index = timestamp // TIMESTAMP_STEP
-            if tick_index < 0 or tick_index >= TICKS_PER_DAY:
-                raise ValueError(f"Unexpected timestamp {timestamp} in round {round_num} day {day_num}")
-            parsed = parse_price_row(row)
-            prices_by_tick[tick_index][parsed.product] = parsed
-            products.add(parsed.product)
+            prices_by_tick: list[dict[str, HistoricalPriceRow]] = [dict() for _ in range(TICKS_PER_DAY)]
+            with file.open("r", encoding="utf-8") as handle:
+                next(handle, None)
+                for line in handle:
+                    columns = line.rstrip("\n").split(";")
+                    timestamp = int(columns[1])
+                    tick_index = timestamp // TIMESTAMP_STEP
+                    if tick_index < 0 or tick_index >= TICKS_PER_DAY:
+                        raise ValueError(f"Unexpected timestamp {timestamp} in round {round_num} day {day_num}")
+                    parsed = parse_price_columns(columns)
+                    prices_by_tick[tick_index][parsed.product] = parsed
+                    products.add(parsed.product)
 
         with file_reader.file([f"round{round_num}", f"trades_round_{round_num}_day_{day_num}.csv"]) as file:
-            trade_rows = [] if file is None else read_csv_rows(file)
-
-        trades_by_tick: list[list[HistoricalTradeRow]] = [[] for _ in range(TICKS_PER_DAY)]
-        for row in trade_rows:
-            timestamp = int(row["timestamp"])
-            tick_index = timestamp // TIMESTAMP_STEP
-            if 0 <= tick_index < TICKS_PER_DAY:
-                trades_by_tick[tick_index].append(parse_trade_row(row))
+            trades_by_tick: list[list[HistoricalTradeRow]] = [[] for _ in range(TICKS_PER_DAY)]
+            if file is not None:
+                with file.open("r", encoding="utf-8") as handle:
+                    next(handle, None)
+                    for line in handle:
+                        columns = line.rstrip("\n").split(";")
+                        timestamp = int(columns[0])
+                        tick_index = timestamp // TIMESTAMP_STEP
+                        if 0 <= tick_index < TICKS_PER_DAY:
+                            trades_by_tick[tick_index].append(parse_trade_columns(columns))
 
         normalized_prices = normalize_mid_prices(prices_by_tick)
         for product in normalized_prices[0]:
@@ -453,17 +591,15 @@ def bootstrap_day(
             for product in dataset.products:
                 price_row = source_tick.prices_by_product[product]
                 price_delta = block_price_deltas[product]
-                shifted_row = price_row.shifted(price_delta)
-                price_rows.append(shifted_row.to_backtest_row(target_day, timestamp))
+                price_rows.append(price_row.to_shifted_backtest_row(target_day, timestamp, price_delta))
                 if price_lines is not None:
-                    price_lines.append(shifted_row.to_csv_line(target_day, timestamp))
-                last_emitted_mid[product] = shifted_row.mid_price
+                    price_lines.append(price_row.to_shifted_csv_line(target_day, timestamp, price_delta))
+                last_emitted_mid[product] = price_row.mid_price + price_delta
             for trade_row in source_tick.trades:
                 price_delta = block_price_deltas.get(trade_row.symbol, 0)
-                shifted_trade = trade_row.shifted(price_delta)
-                trades.append(shifted_trade.to_trade(timestamp))
+                trades.append(trade_row.to_shifted_trade(timestamp, price_delta))
                 if trade_lines is not None:
-                    trade_lines.append(shifted_trade.to_csv_line(timestamp))
+                    trade_lines.append(trade_row.to_shifted_csv_line(timestamp, price_delta))
 
         target_tick += block_length
 
